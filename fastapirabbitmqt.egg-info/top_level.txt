@@ -1,0 +1,6 @@
+api
+database
+rabbitmq
+schemas
+services
+workers
