@@ -1,7 +1,7 @@
+import asyncio
 import logging
-import sys
-import threading
 import signal
+import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -13,6 +13,7 @@ from rabbitmq import (
     create_routing_worker,
     dlq_consumer,
     setup_infrastructure,
+    connection_manager,
 )
 
 logging.basicConfig(
@@ -22,36 +23,22 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-workers = []
-threads = []
-shutdown_event = threading.Event()
-
-
-def signal_handler(signum, frame):
-    logger.info(f"Received signal {signum}, shutting down workers...")
-    shutdown_event.set()
-    for worker in workers:
-        worker.stop()
-    sys.exit(0)
-
-
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
-
-
-def run_worker(worker, name):
+async def run_worker(worker, name):
     try:
         logger.info(f"Starting {name}")
-        worker.start()
+        await worker.start()
+    except asyncio.CancelledError:
+        logger.info(f"{name} cancelled")
     except Exception as e:
         logger.error(f"Error in {name}: {e}", exc_info=True)
 
 
-def main():
+async def main():
     logger.info("Setting up RabbitMQ infrastructure...")
-    setup_infrastructure()
+    await connection_manager.connect()
+    await setup_infrastructure()
 
-    worker_configs = [
+    workers = [
         ("basic_worker", basic_worker),
         ("work_queue_worker_1", create_worker(1)),
         ("work_queue_worker_2", create_worker(2)),
@@ -62,23 +49,28 @@ def main():
         ("dlq_consumer", dlq_consumer),
     ]
 
-    for name, worker in worker_configs:
-        workers.append(worker)
-        thread = threading.Thread(target=run_worker, args=(worker, name), daemon=True)
-        threads.append(thread)
-        thread.start()
+    tasks = [
+        asyncio.create_task(run_worker(worker, name))
+        for name, worker in workers
+    ]
 
-    logger.info(f"Started {len(workers)} workers")
+    logger.info(f"Started {len(tasks)} workers")
     logger.info("Workers running. Press Ctrl+C to stop.")
 
-    shutdown_event.wait()
-
-    logger.info("Waiting for threads to finish...")
-    for thread in threads:
-        thread.join(timeout=5)
-
-    logger.info("All workers stopped")
+    try:
+        await asyncio.gather(*tasks)
+    except asyncio.CancelledError:
+        logger.info("Shutdown signal received")
+    finally:
+        logger.info("Stopping workers...")
+        for _, worker in workers:
+            await worker.stop()
+        await connection_manager.close()
+        logger.info("All workers stopped")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Exiting...")

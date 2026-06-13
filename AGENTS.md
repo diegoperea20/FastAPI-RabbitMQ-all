@@ -4,7 +4,7 @@
 
 This is a **FastAPI** application that demonstrates **4 RabbitMQ messaging patterns** using **SQLAlchemy (SQLite)** for task persistence, with retry logic, Dead Letter Queue (DLQ), and task status tracking.
 
-**Stack**: Python 3.11+, FastAPI, SQLAlchemy 2.0, Pika (RabbitMQ), Pydantic v2, SQLite
+**Stack**: Python 3.11+, FastAPI, SQLAlchemy 2.0 (async), aio-pika (async RabbitMQ), Pydantic v2, aiosqlite
 
 ---
 
@@ -15,24 +15,24 @@ fastapirabbitmqt/
 ├── main.py                     # FastAPI app entry point, lifespan events
 ├── config.py                   # Singleton Settings via pydantic-settings
 ├── database/
-│   ├── __init__.py             # Re-exports: Base, engine, SessionLocal, get_db, init_db, Task, TaskStatus
-│   ├── session.py              # SQLAlchemy engine, sessionmaker, get_db() generator, init_db()
+│   ├── __init__.py             # Re-exports: Base, engine, AsyncSessionLocal, get_db, init_db, close_db, Task, TaskStatus
+│   ├── session.py              # Async SQLAlchemy engine, async_sessionmaker, get_db() async generator, init_db(), close_db()
 │   └── models.py               # Task model (id, title, description, status, pattern, retry_count, max_retries, error_message, timestamps)
 ├── schemas/
 │   ├── __init__.py             # Re-exports all Pydantic models
 │   └── task.py                 # TaskCreate, TaskUpdate, TaskResponse, TaskListResponse, TaskStatusResponse + enums TaskPattern, TaskStatus
 ├── rabbitmq/
 │   ├── __init__.py             # Re-exports all RabbitMQ components
-│   ├── connection.py           # RabbitMQConnection singleton, get_connection(), channel() context manager
-│   ├── exchanges.py            # Exchange/queue/binding declarations, setup_infrastructure()
-│   ├── producer.py             # TaskProducer: publish_basic(), publish_work_queue(), publish_fanout(), publish_routing(), publish_by_pattern()
-│   ├── consumer.py             # BaseConsumer (abstract), CallbackConsumer - retry logic, DLQ routing
-│   ├── dlq.py                  # DLQConsumer - marks tasks as FAILED in DB
+│   ├── connection.py           # RabbitMQConnectionManager singleton via aio-pika pool, channel() async context manager
+│   ├── exchanges.py            # Exchange/queue/binding declarations using aio-pika, setup_infrastructure() async
+│   ├── producer.py             # TaskProducer: async publish_basic(), publish_work_queue(), publish_fanout(), publish_routing(), publish_by_pattern()
+│   ├── consumer.py             # BaseConsumer (abstract async), CallbackConsumer - async retry logic via aio-pika
+│   ├── dlq.py                  # DLQConsumer - marks tasks as FAILED in DB (async)
 │   └── workers/
-│       ├── basic_worker.py     # BasicWorker - single consumer, 1s simulated work
-│       ├── work_queue_worker.py # WorkQueueWorker - competing consumers, 2s simulated work
-│       ├── pubsub_worker.py    # PubSubWorker - fanout subscribers, 1s simulated work
-│       └── routing_worker.py   # RoutingWorker - topic routing, 1.5s simulated work
+│       ├── basic_worker.py     # BasicWorker - async consumer, 1s simulated work via asyncio.sleep()
+│       ├── work_queue_worker.py # WorkQueueWorker - competing consumers, 2s simulated work (async)
+│       ├── pubsub_worker.py    # PubSubWorker - fanout subscribers, 1s simulated work (async)
+│       └── routing_worker.py   # RoutingWorker - topic routing, 1.5s simulated work (async)
 ├── services/
 │   ├── __init__.py             # Re-exports TaskService
 │   └── task_service.py         # TaskService CRUD + publish to RabbitMQ
@@ -43,7 +43,7 @@ fastapirabbitmqt/
 │       ├── __init__.py         # Re-exports tasks_router
 │       └── tasks.py            # REST: POST/GET /tasks, GET/PATCH/DELETE /tasks/{id}, GET /tasks/{id}/status
 └── workers/
-    └── run_workers.py          # Launches 8 workers in threads: basic, 2x work_queue, 2x pubsub, 2x routing, dlq
+    └── run_workers.py          # Launches 8 workers in asyncio tasks: basic, 2x work_queue, 2x pubsub, 2x routing, dlq
 ```
 
 ---
@@ -57,7 +57,7 @@ fastapirabbitmqt/
 - **Type hints** used throughout, `Optional[X]` preferred over `X | None`
 - **Logging** uses standard `logging.getLogger(__name__)` in every module
 - **Exception handling**: workers catch exceptions, update task status to FAILED, then re-raise for consumer retry logic
-- **RabbitMQ connection**: Singleton pattern via `RabbitMQConnection.__new__`, with auto-reconnect up to 5 retries
+- **RabbitMQ connection**: Singleton pattern via `RabbitMQConnectionManager`, with connection pool (aio-pika Pool) and auto-reconnect
 - **Singleton pattern for producer/consumer** instances at module level (e.g., `producer = TaskProducer()`)
 
 ---
@@ -132,9 +132,9 @@ Messages use `delivery_mode=2` (persistent), `content_type=application/json`, wi
 - `connection_manager.close()` - Closes RabbitMQ on shutdown
 
 ### `rabbitmq/connection.py:RabbitMQConnection`
-- Singleton via `__new__`
-- Auto-reconnect with up to 5 attempts, 2s base delay
-- `channel()` context manager yields pika channel, reconnects on error
+- Singleton via `aio_pika.pool.Pool`
+- Auto-reconnect with robust connection pool
+- `channel()` async context manager yields aio-pika channel from pool
 
 ### `rabbitmq/consumer.py:BaseConsumer`
 - Abstract base class for all workers
@@ -147,7 +147,7 @@ Messages use `delivery_mode=2` (persistent), `content_type=application/json`, wi
 - All non-DLQ queues have `x-dead-letter-exchange: tasks.dlx` and `x-dead-letter-routing-key: dlq`
 
 ### `workers/run_workers.py`
-- Launches 8 workers in separate daemon threads
+- Launches 8 workers in separate asyncio tasks
 - Handles SIGINT/SIGTERM for graceful shutdown
 - Workers list: `[basic_worker, work_queue_worker_1, work_queue_worker_2, pubsub_subscriber_1, pubsub_subscriber_2, routing_worker_1, routing_worker_2, dlq_consumer]`
 
@@ -212,7 +212,8 @@ uv run pytest
 | `fastapi` | >=0.109.0 | Web framework |
 | `uvicorn[standard]` | >=0.27.0 | ASGI server |
 | `sqlalchemy` | >=2.0.0 | ORM + database |
-| `pika` | >=1.3.0 | RabbitMQ client |
+| `aio-pika` | >=9.0.0 | Async RabbitMQ client |
+| `aiosqlite` | >=0.19.0 | Async SQLite driver |
 | `pydantic` | >=2.5.0 | Data validation |
 | `pydantic-settings` | >=2.1.0 | Settings management |
 | `python-dotenv` | >=1.0.0 | .env file loading |

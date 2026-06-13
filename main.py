@@ -8,8 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import settings
-from database import init_db
-from rabbitmq import setup_infrastructure
+from database import init_db, close_db
+from rabbitmq import setup_infrastructure, connection_manager
 from api import tasks_router
 
 logging.basicConfig(
@@ -22,14 +22,18 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting up...")
-    init_db()
+    await init_db()
     logger.info("Database initialized")
-    setup_infrastructure()
-    logger.info("RabbitMQ infrastructure initialized")
+    try:
+        await connection_manager.connect()
+        await setup_infrastructure()
+        logger.info("RabbitMQ infrastructure initialized")
+    except Exception as e:
+        logger.warning(f"RabbitMQ not available at startup: {e}")
     yield
     logger.info("Shutting down...")
-    from rabbitmq.connection import connection_manager
-    connection_manager.close()
+    await connection_manager.close()
+    await close_db()
 
 
 app = FastAPI(
@@ -65,8 +69,7 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    from rabbitmq.connection import connection_manager
-    rabbitmq_connected = connection_manager.is_connected()
+    rabbitmq_connected = await connection_manager.is_connected()
     return {
         "status": "healthy" if rabbitmq_connected else "degraded",
         "rabbitmq": "connected" if rabbitmq_connected else "disconnected",

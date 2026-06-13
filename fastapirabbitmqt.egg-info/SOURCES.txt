@@ -5,6 +5,7 @@ api/deps.py
 api/routes/__init__.py
 api/routes/tasks.py
 database/__init__.py
+database/base.py
 database/models.py
 database/session.py
 fastapirabbitmqt.egg-info/PKG-INFO

@@ -23,6 +23,12 @@ A comprehensive FastAPI application demonstrating multiple RabbitMQ messaging pa
   - Get task details and real-time status
   - Update and delete tasks
 
+- **Async-First Architecture**
+  - **aio-pika** for fully async RabbitMQ communication
+  - **Async SQLAlchemy** + **aiosqlite** for non-blocking database operations
+  - All workers run as **asyncio tasks** in a single event loop
+  - Connection pool with automatic reconnection
+
 - **Production Features**
   - Message persistence and durability
   - Manual acknowledgment (auto-ack disabled)
@@ -135,18 +141,18 @@ fastapirabbitmqt/
 ├── config.py                   # Settings via pydantic-settings
 ├── database/
 │   ├── __init__.py
-│   ├── session.py              # SQLAlchemy engine and session
+│   ├── session.py              # Async SQLAlchemy engine & session (aiosqlite)
 │   └── models.py               # Task model with status enum
 ├── schemas/
 │   ├── __init__.py
 │   └── task.py                 # Pydantic request/response schemas
 ├── rabbitmq/
 │   ├── __init__.py
-│   ├── connection.py           # Singleton connection manager
+│   ├── connection.py           # Async connection manager (aio-pika)
 │   ├── exchanges.py            # Infrastructure setup (exchanges, queues)
-│   ├── producer.py             # Message publisher
-│   ├── consumer.py             # Base consumer with retry/DLQ logic
-│   ├── dlq.py                  # Dead letter queue consumer
+│   ├── producer.py             # Async message publisher
+│   ├── consumer.py             # Async base consumer with retry/DLQ logic
+│   ├── dlq.py                  # Async dead letter queue consumer
 │   └── workers/
 │       ├── __init__.py
 │       ├── basic_worker.py     # Basic queue consumer
@@ -173,7 +179,7 @@ Copy `.env.example` or set environment variables:
 
 
 ```
-DATABASE_URL=sqlite:///./tasks.db
+DATABASE_URL=sqlite+aiosqlite:///./tasks.db
 RABBITMQ_HOST=localhost
 RABBITMQ_PORT=5672
 RABBITMQ_USER=guest
@@ -187,7 +193,7 @@ WORKER_PREFETCH_COUNT=1
 
 | Variable | Default | Description |
 |---|---|---|
-| `DATABASE_URL` | `sqlite:///./tasks.db` | Database connection |
+| `DATABASE_URL` | `sqlite+aiosqlite:///./tasks.db` | Async database connection (aiosqlite) |
 | `RABBITMQ_HOST` | `localhost` | RabbitMQ server |
 | `RABBITMQ_PORT` | `5672` | AMQP port |
 | `RABBITMQ_USER` | `guest` | RabbitMQ username |

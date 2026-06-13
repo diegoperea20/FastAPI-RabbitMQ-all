@@ -1,36 +1,45 @@
 import os
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from .base import Base
 from config import settings
 
 
 def _resolve_db_url(url: str) -> str:
-    if url.startswith("sqlite:///./"):
+    if "sqlite" in url and "+aiosqlite" not in url:
+        url = url.replace("sqlite://", "sqlite+aiosqlite://")
+    if url.startswith("sqlite+aiosqlite:///./"):
         _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        rel = url[len("sqlite:///./"):]
-        return f"sqlite:///{os.path.join(_BASE, rel)}"
+        rel = url[len("sqlite+aiosqlite:///./"):]
+        return f"sqlite+aiosqlite:///{os.path.join(_BASE, rel)}"
     return url
 
 
 _db_url = _resolve_db_url(settings.DATABASE_URL)
-engine = create_engine(
+engine = create_async_engine(
     _db_url,
     connect_args={"check_same_thread": False} if "sqlite" in _db_url else {},
     echo=settings.DEBUG,
 )
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+AsyncSessionLocal = async_sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+)
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+async def get_db() -> AsyncSession:
+    async with AsyncSessionLocal() as session:
+        yield session
 
 
-def init_db():
+async def init_db() -> None:
     from database.models import Task
-    Base.metadata.create_all(bind=engine)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+
+async def close_db() -> None:
+    await engine.dispose()

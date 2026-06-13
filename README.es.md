@@ -23,6 +23,12 @@ Una aplicación integral con FastAPI que demuestra múltiples patrones de mensaj
   - Obtener detalles y estado en tiempo real
   - Actualizar y eliminar tareas
 
+- **Arquitectura Asíncrona**
+  - **aio-pika** para comunicación RabbitMQ totalmente asíncrona
+  - **Async SQLAlchemy** + **aiosqlite** para operaciones de base de datos no bloqueantes
+  - Todos los workers ejecutados como **tareas asyncio** en un solo bucle de eventos
+  - Pool de conexiones con reconexión automática
+
 - **Características de Producción**
   - Persistencia y durabilidad de mensajes
   - Confirmación manual (auto-ack desactivado)
@@ -137,18 +143,18 @@ fastapirabbitmqt/
 ├── config.py                   # Configuración via pydantic-settings
 ├── database/
 │   ├── __init__.py
-│   ├── session.py              # Motor SQLAlchemy y sesión
+│   ├── session.py              # Motor SQLAlchemy asíncrono (aiosqlite)
 │   └── models.py               # Modelo Task con enum de estado
 ├── schemas/
 │   ├── __init__.py
 │   └── task.py                 # Esquemas Pydantic de solicitud/respuesta
 ├── rabbitmq/
 │   ├── __init__.py
-│   ├── connection.py           # Gestor de conexión singleton
+│   ├── connection.py           # Gestor de conexión async (aio-pika)
 │   ├── exchanges.py            # Configuración de infraestructura
-│   ├── producer.py             # Publicador de mensajes
-│   ├── consumer.py             # Consumidor base con reintentos/DLQ
-│   ├── dlq.py                  # Consumidor de cola de mensajes fallidos
+│   ├── producer.py             # Publicador de mensajes async
+│   ├── consumer.py             # Consumidor base async con reintentos/DLQ
+│   ├── dlq.py                  # Consumidor async de cola de mensajes fallidos
 │   └── workers/
 │       ├── __init__.py
 │       ├── basic_worker.py     # Consumidor de cola básica
@@ -175,7 +181,7 @@ Copia `.env.example` o define variables de entorno:
 
 
 ```
-DATABASE_URL=sqlite:///./tasks.db
+DATABASE_URL=sqlite+aiosqlite:///./tasks.db
 RABBITMQ_HOST=localhost
 RABBITMQ_PORT=5672
 RABBITMQ_USER=guest
@@ -186,9 +192,10 @@ WORKER_PREFETCH_COUNT=1
 ```
 
 
+
 | Variable | Default | Descripción |
 |---|---|---|
-| `DATABASE_URL` | `sqlite:///./tasks.db` | Conexión a base de datos |
+| `DATABASE_URL` | `sqlite+aiosqlite:///./tasks.db` | Conexión asíncrona a base de datos (aiosqlite) |
 | `RABBITMQ_HOST` | `localhost` | Servidor RabbitMQ |
 | `RABBITMQ_PORT` | `5672` | Puerto AMQP |
 | `RABBITMQ_USER` | `guest` | Usuario RabbitMQ |

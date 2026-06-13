@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     APP_VERSION: str = "0.1.0"
     DEBUG: bool = True
 
-    DATABASE_URL: str = "sqlite:///./tasks.db"
+    DATABASE_URL: str = "sqlite+aiosqlite:///./tasks.db"
 
     RABBITMQ_HOST: str = "localhost"
     RABBITMQ_PORT: int = 5672
@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     RABBITMQ_CONNECTION_TIMEOUT: int = 10
     RABBITMQ_HEARTBEAT: int = 60
     RABBITMQ_BLOCKED_CONNECTION_TIMEOUT: int = 300
+
+    RABBITMQ_POOL_SIZE: int = 2
+    RABBITMQ_CHANNEL_POOL_SIZE: int = 10
 
     MAX_RETRIES: int = 3
     RETRY_DELAY_BASE: float = 2.0

@@ -1,15 +1,19 @@
+import logging
 from typing import List, Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, delete
 from database import Task, TaskStatus
 from schemas import TaskCreate, TaskUpdate, TaskPattern
 from rabbitmq import producer
 
+logger = logging.getLogger(__name__)
+
 
 class TaskService:
-    def __init__(self, db: Session):
+    def __init__(self, db: AsyncSession):
         self.db = db
 
-    def create_task(self, task_data: TaskCreate) -> Task:
+    async def create_task(self, task_data: TaskCreate) -> Task:
         task = Task(
             title=task_data.title,
             description=task_data.description,
@@ -17,40 +21,47 @@ class TaskService:
             status=TaskStatus.PENDING,
         )
         self.db.add(task)
-        self.db.commit()
-        self.db.refresh(task)
+        await self.db.commit()
+        await self.db.refresh(task)
 
-        producer.publish_by_pattern(
-            pattern=task_data.pattern.value,
-            task_id=task.id,
-            title=task.title,
-            description=task.description or "",
-        )
+        try:
+            await producer.publish_by_pattern(
+                pattern=task_data.pattern.value,
+                task_id=task.id,
+                title=task.title,
+                description=task.description or "",
+            )
+        except Exception as e:
+            logger.warning(f"Failed to publish task {task.id} to RabbitMQ: {e}")
 
         return task
 
-    def get_task(self, task_id: int) -> Optional[Task]:
-        return self.db.query(Task).filter(Task.id == task_id).first()
+    async def get_task(self, task_id: int) -> Optional[Task]:
+        result = await self.db.execute(select(Task).where(Task.id == task_id))
+        return result.scalar_one_or_none()
 
-    def get_tasks(
+    async def get_tasks(
         self,
         skip: int = 0,
         limit: int = 100,
         status: Optional[TaskStatus] = None,
     ) -> List[Task]:
-        query = self.db.query(Task)
+        query = select(Task)
         if status:
-            query = query.filter(Task.status == status)
-        return query.order_by(Task.created_at.desc()).offset(skip).limit(limit).all()
+            query = query.where(Task.status == status)
+        query = query.order_by(Task.created_at.desc()).offset(skip).limit(limit)
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
 
-    def count_tasks(self, status: Optional[TaskStatus] = None) -> int:
-        query = self.db.query(Task)
+    async def count_tasks(self, status: Optional[TaskStatus] = None) -> int:
+        query = select(func.count(Task.id))
         if status:
-            query = query.filter(Task.status == status)
-        return query.count()
+            query = query.where(Task.status == status)
+        result = await self.db.execute(query)
+        return result.scalar_one()
 
-    def update_task(self, task_id: int, task_data: TaskUpdate) -> Optional[Task]:
-        task = self.get_task(task_id)
+    async def update_task(self, task_id: int, task_data: TaskUpdate) -> Optional[Task]:
+        task = await self.get_task(task_id)
         if not task:
             return None
 
@@ -61,20 +72,20 @@ class TaskService:
             else:
                 setattr(task, field, value)
 
-        self.db.commit()
-        self.db.refresh(task)
+        await self.db.commit()
+        await self.db.refresh(task)
         return task
 
-    def delete_task(self, task_id: int) -> bool:
-        task = self.get_task(task_id)
+    async def delete_task(self, task_id: int) -> bool:
+        task = await self.get_task(task_id)
         if not task:
             return False
-        self.db.delete(task)
-        self.db.commit()
+        await self.db.delete(task)
+        await self.db.commit()
         return True
 
-    def get_task_status(self, task_id: int) -> Optional[dict]:
-        task = self.get_task(task_id)
+    async def get_task_status(self, task_id: int) -> Optional[dict]:
+        task = await self.get_task(task_id)
         if not task:
             return None
         return {

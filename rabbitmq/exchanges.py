@@ -1,10 +1,12 @@
-from .connection import create_connection
+import aio_pika
+from aio_pika import ExchangeType
+from .connection import connection_manager
 
 EXCHANGES = {
-    "tasks.direct": {"type": "direct", "durable": True},
-    "tasks.fanout": {"type": "fanout", "durable": True},
-    "tasks.topic": {"type": "topic", "durable": True},
-    "tasks.dlx": {"type": "direct", "durable": True},
+    "tasks.direct": {"type": ExchangeType.DIRECT, "durable": True},
+    "tasks.fanout": {"type": ExchangeType.FANOUT, "durable": True},
+    "tasks.topic": {"type": ExchangeType.TOPIC, "durable": True},
+    "tasks.dlx": {"type": ExchangeType.DIRECT, "durable": True},
 }
 
 QUEUES = {
@@ -29,40 +31,36 @@ DLX_ARGUMENTS = {
 }
 
 
-def declare_exchanges(channel) -> None:
+async def declare_exchanges(channel: aio_pika.Channel) -> None:
     for name, config in EXCHANGES.items():
-        channel.exchange_declare(
-            exchange=name,
-            exchange_type=config["type"],
+        await channel.declare_exchange(
+            name=name,
+            type=config["type"],
             durable=config["durable"],
         )
 
 
-def declare_queues(channel) -> None:
+async def declare_queues(channel: aio_pika.Channel) -> None:
     for name, config in QUEUES.items():
         args = {}
         if name != "tasks.dlq":
             args = DLX_ARGUMENTS
-        channel.queue_declare(
-            queue=name,
+        await channel.declare_queue(
+            name=name,
             durable=config["durable"],
             arguments=args,
         )
 
 
-def declare_bindings(channel) -> None:
+async def declare_bindings(channel: aio_pika.Channel) -> None:
     for binding in BINDINGS:
-        channel.queue_bind(
-            queue=binding["queue"],
-            exchange=binding["exchange"],
-            routing_key=binding["routing_key"],
-        )
+        exchange = await channel.get_exchange(binding["exchange"])
+        queue = await channel.get_queue(binding["queue"])
+        await queue.bind(exchange, routing_key=binding["routing_key"])
 
 
-def setup_infrastructure() -> None:
-    conn = create_connection()
-    with conn.channel() as channel:
-        declare_exchanges(channel)
-        declare_queues(channel)
-        declare_bindings(channel)
-    conn.close()
+async def setup_infrastructure() -> None:
+    async with connection_manager.channel() as channel:
+        await declare_exchanges(channel)
+        await declare_queues(channel)
+        await declare_bindings(channel)

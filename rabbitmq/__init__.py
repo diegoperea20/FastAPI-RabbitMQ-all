@@ -1,12 +1,9 @@
-from .connection import get_connection, connection_manager, RabbitMQConnection
+from .connection import connection_manager, get_connection_manager, RabbitMQConnectionManager
 from .exchanges import (
     EXCHANGES,
     QUEUES,
     BINDINGS,
     DLX_ARGUMENTS,
-    declare_exchanges,
-    declare_queues,
-    declare_bindings,
     setup_infrastructure,
 )
 from .producer import TaskProducer, producer
@@ -24,16 +21,13 @@ from .workers import (
 )
 
 __all__ = [
-    "get_connection",
     "connection_manager",
-    "RabbitMQConnection",
+    "get_connection_manager",
+    "RabbitMQConnectionManager",
     "EXCHANGES",
     "QUEUES",
     "BINDINGS",
     "DLX_ARGUMENTS",
-    "declare_exchanges",
-    "declare_queues",
-    "declare_bindings",
     "setup_infrastructure",
     "TaskProducer",
     "producer",
